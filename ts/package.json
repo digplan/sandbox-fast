@@ -1,0 +1,51 @@
+{
+  "name": "fast-container-for-ant",
+  "version": "1.0.1",
+  "description": "Ultra-low-latency macOS sandbox container creator & 1,000-container benchmark (APFS CoW + XNU DFA bytecode + Darwin ulock)",
+  "type": "module",
+  "bin": {
+    "fast-container-for-ant": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "native",
+    "README.md"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "scripts": {
+    "build:native": "clang -std=c11 -O3 -flto -mcpu=native -Wall -Wextra -Werror -Wno-deprecated-declarations native/test_1000.c native/sbx.c -lsandbox -flto -o native/test_1000 && clang -std=c11 -O3 -flto -mcpu=native -Wall -Wextra -Werror -Wno-deprecated-declarations native/main.c native/sbx.c native/bench.c -lsandbox -flto -o native/sbx",
+    "build:ts": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "build": "bun run build:native && bun run build:ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node ./dist/cli.js hot --quiet",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "sandbox",
+    "container",
+    "macos",
+    "xnu",
+    "apfs",
+    "benchmark",
+    "agent-sandbox"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.npmrc
+*.tgz
+*.o
+*.dSYM/
+/sbx
+/bench
+/test_1000
+ts/node_modules/
+ts/native/sbx
+ts/native/test_1000
