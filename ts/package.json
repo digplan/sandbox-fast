@@ -1,6 +1,6 @@
 {
   "name": "fast-container-for-ant",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Ultra-low-latency macOS sandbox container creator & 1,000-container benchmark (APFS CoW + XNU DFA bytecode + Darwin ulock)",
   "type": "module",
   "bin": {
