@@ -1,50 +1,73 @@
 # sandbox-fast
 
-Ultra-low-latency macOS sandbox container engine in pure C11 (`clang -O3 -flto -mcpu=native`), combining **APFS Copy-on-Write (`clonefileat`) rootfs isolation**, **pre-compiled XNU Kernel Mandatory Access Control (MAC) DFA bytecode (`sandbox_apply_bytecode`)**, **dynamic XNU capability tokens (`__mac_syscall("Sandbox", 5)`)**, and **16 KB hardware-page-isolated shared memory + Darwin `ulock` (`__ulock_wait` / `__ulock_wake`) IPC**.
+Minimal macOS container sandbox written in C11. It uses APFS copy-on-write directory clones (`clonefileat`), precompiled XNU Seatbelt bytecode (`sandbox_apply_bytecode`), kernel capability tokens, and shared memory with Darwin `ulock` for IPC.
 
-## Single-Operation Latency & Throughput (`./sbx bench`)
+## Quick start
 
-| Operation | Mode | Min | Median (p50) | p99 | Rate (`ops / ms`) | vs Target (`300 ms` / `15 ms`) |
-|---|---|---:|---:|---:|---:|---:|
-| **Create** | Reference Claim | 300,000 µs | 300.000 ms (300,000 µs) | 300,000 µs | 0.0033 / ms | 1.0x |
-| **Create** | Apple `/usr/bin/sandbox-exec` | 4,865.71 µs | 5.209 ms (5,208.62 µs) | 7,891.92 µs | 0.19 / ms | **57.6x faster** |
-| **Create** | **SBX Cold** (Live APFS CoW + `fork` + DFA apply) | 320.75 µs | **0.508 ms (507.96 µs)** | 793.50 µs | **1.97 / ms** (3.12 peak) | **590.6x faster** |
-| **Create** | **SBX Warm Zygote** (Live APFS CoW + XNU Token) | 85.08 µs | **0.104 ms (104.00 µs)** | 163.62 µs | **9.62 / ms** (11.75 peak) | **2,884.6x faster** |
-| **Create** | **SBX Hot Pre-Staged** (Pool Checkout) | 0.041 µs | **0.00054 ms (0.542 µs)** | 1.000 µs | **1,845 / ms** (24,390 peak) | **553,505.5x faster** |
-| **Command** | Reference Claim | 15,000 µs | 15.000 ms (15,000 µs) | 15,000 µs | 0.067 / ms | 1.0x |
-| **Command** | **SBX Full `posix_spawn`** (External Mach-O binary) | 615.21 µs | **0.646 ms (646.33 µs)** | 831.67 µs | **1.55 / ms** | **23.2x faster** |
-| **Command** | **SBX Persistent `/bin/sh`** (In-sandbox coprocess) | 20.08 µs | **0.025 ms (25.00 µs)** | 37.75 µs | **40.0 / ms** | **600.0x faster** |
-| **Command** | **SBX Direct In-Sandbox** (SHM + Darwin `ulock`) | 0.500 µs | **0.00058 ms (0.584 µs)** | 0.709 µs | **1,712 / ms** | **25,684.9x faster** |
-
-## 1,000-Container Creation + `"hello world"` Benchmark (`./test_1000.sh`)
-
-| Mode (1,000 Containers + `"hello world"` + Teardown) | Total Create (1,000x) | Total Exec (1,000x) | Total Teardown (1,000x) | Total Wall-Clock Time | Full Lifecycle Rate | vs 315s Ref |
-|---|---:|---:|---:|---:|---:|---:|
-| **Reference Claim** (`300ms + 15ms` × 1,000) | 300,000.00 ms | 15,000.00 ms | — | **315,000.00 ms (315.00 s)** | 0.0032 / ms (`3.2/s`) | 1.0x |
-| **`./test_1000.sh cold`** (1,000 OS `fork` + CoW + DFA) | 478.69 ms (`478.7 µs`/ea) | 6.99 ms (`6.99 µs`/ea) | 364.86 ms | **852.94 ms (0.853 s)** | **1.17 / ms** (`1,172/s`) | **369.3x faster** |
-| **`./test_1000.sh warm`** (1,000 APFS CoW + XNU Tokens) | 118.65 ms (`118.7 µs`/ea) | 7.11 ms (`7.11 µs`/ea) | 269.48 ms | **395.42 ms (0.395 s)** | **2.53 / ms** (`2,529/s`) | **796.6x faster** |
-| **`./test_1000.sh hot`** (Pre-Staged Pool Checkout) | 0.01 ms (`0.01 µs`/ea) | 0.67 ms (`0.67 µs`/ea) | 0.01 ms | **0.76 ms (0.00076 s)** | **1,315.7 / ms** (`1.32M/s`) | **414,450.8x faster** |
-
-## Local Drive Mounting & Agent Execution Timings (`./demo_agent.sh`)
-
-| Agent / Mount Operation | Command | Latency |
-|---|---|---:|
-| **Mount Local Drive (Read-Write)** | `./sbx mount --rw <id> <host_dir> workspace` | **62.04 µs (0.062 ms)** |
-| **Mount Local Drive (Read-Only)** | `./sbx mount --ro <id> <host_dir> workspace` | **~60.00 µs (0.060 ms)** |
-| **Mount Local Drive (APFS CoW Snapshot)** | `./sbx mount --cow <id> <host_dir> workspace_cow` | **109.75 µs (0.110 ms)** |
-| **Agent `ls workspace` / `cat TASK.md` (CLI IPC)** | `./sbx exec <id> ls workspace` | **22.62 – 32.46 µs** |
-| **Kernel Escape Block (`EPERM`)** | `./sbx exec <id> cat /Users/chris/AGENTS.md` | **31.62 – 36.58 µs** |
-
-## Quick Reference & Commands
+Run the 1,000-container benchmark directly via npx:
 
 ```sh
-make                        # Build ./sbx, ./bench, and ./test_1000
-./sbx bench                 # Run full latency & 6-point isolation benchmark suite
-./sbx verify                # Run 6-point XNU MAC + APFS CoW security verification
-./test_1000.sh [warm|hot|cold]  # Run 1,000-container "hello world" benchmark
-./demo_agent.sh             # Run autonomous coding agent + mapped local drive demo
+npx fast-container-for-ant
+```
 
-# Interactive CLI
+Or build from source:
+
+```sh
+make
+./sbx bench
+./sbx verify
+./test_1000.sh
+./demo_agent.sh
+```
+
+## Benchmarks
+
+Measured on Apple Silicon (macOS 27.0 / Darwin 27.0.0) against a reference target of 300 ms container creation and 15 ms command execution.
+
+### Single operation latency
+
+| Operation | Mode | Min (us) | Median p50 (us) | p99 (us) | Rate (ops/ms) | Speedup vs target |
+|---|---|---:|---:|---:|---:|---:|
+| Create | Reference target (300 ms) | 300,000.00 | 300,000.00 | 300,000.00 | 0.0033 | 1.0x |
+| Create | Apple sandbox-exec CLI | 4,865.71 | 5,208.62 | 7,891.92 | 0.19 | 57.6x |
+| Create | Cold (APFS CoW + fork + DFA) | 320.75 | 507.96 | 793.50 | 1.97 | 590.6x |
+| Create | Warm zygote (live CoW + token) | 85.08 | 104.00 | 163.62 | 9.62 | 2,884.6x |
+| Create | Hot pre-staged (pool checkout) | 0.041 | 0.542 | 1.000 | 1,845.0 | 553,505.5x |
+| Command | Reference target (15 ms) | 15,000.00 | 15,000.00 | 15,000.00 | 0.067 | 1.0x |
+| Command | Full posix_spawn (external binary) | 615.21 | 646.33 | 831.67 | 1.55 | 23.2x |
+| Command | Persistent /bin/sh coprocess | 20.08 | 25.00 | 37.75 | 40.0 | 600.0x |
+| Command | Direct builtin (SHM + ulock) | 0.500 | 0.584 | 0.709 | 1,712.3 | 25,684.9x |
+
+### 1,000-container benchmark
+
+Creates 1,000 containers sequentially, runs `echo "hello world"` inside each one, prints the output, and tears the container down.
+
+| Mode | Create total | Exec total | Teardown total | Wall time | Rate (containers/ms) | Speedup vs 315s |
+|---|---:|---:|---:|---:|---:|---:|
+| Reference (315 ms x 1,000) | 300,000.00 ms | 15,000.00 ms | - | 315,000.00 ms (315.00 s) | 0.0032 | 1.0x |
+| Cold (1,000 forks + CoW) | 478.69 ms | 6.99 ms | 364.86 ms | 852.94 ms (0.853 s) | 1.17 | 369.3x |
+| Warm (1,000 CoW + tokens) | 118.65 ms | 7.11 ms | 269.48 ms | 395.42 ms (0.395 s) | 2.53 | 796.6x |
+| Hot (pre-staged pool) | 0.01 ms | 0.67 ms | 0.01 ms | 0.76 ms (0.00076 s) | 1,315.7 | 414,450.8x |
+
+### Local drive mount and agent operations
+
+| Operation | Command | Time (us) |
+|---|---|---:|
+| Mount local folder (read-write) | `./sbx mount --rw <id> <dir> workspace` | 62.04 |
+| Mount local folder (read-only) | `./sbx mount --ro <id> <dir> workspace` | 60.00 |
+| Mount local folder (APFS CoW clone) | `./sbx mount --cow <id> <dir> workspace_cow` | 109.75 |
+| Agent directory list / file read | `./sbx exec <id> ls workspace` | 22.62 - 32.46 |
+| Kernel block on host file read (EPERM) | `./sbx exec <id> cat /Users/chris/AGENTS.md` | 31.62 - 36.58 |
+
+## How it works
+
+1. Precompiled sandbox bytecode: `sandbox_init()` normally runs a TinyScheme parser on every invocation (~11.7 ms). `sbx` compiles the profile once with `sandbox_compile_string()`, caches the DFA bytecode to `/private/tmp/sbx-fast/profile.dfa`, and loads it into the kernel with `sandbox_apply_bytecode()` in ~95 us.
+2. Dynamic capability tokens: Worker processes enter the XNU sandbox before a container directory is assigned. On creation, the controller clones `/private/tmp/sbx-fast/base_rootfs` with `clonefileat()` and issues a `com.apple.app-sandbox.read-write` token directly into shared memory via `__mac_syscall("Sandbox", 5)`.
+3. Page-isolated shared memory IPC: Each container uses a single 16 KB page (`SBX_PAGE_SIZE = 16384`). Before applying the sandbox profile, each worker unmaps the control page and all other container slots so its page tables only map its own IPC buffer.
+
+## CLI usage
+
+```sh
 ./sbx create [hot|warm|cold]
 ./sbx mount [--rw|--ro|--cow] <id> <host_dir> [mount_name]
 ./sbx exec [--direct|--shell|--spawn] <id> <cmd...>
